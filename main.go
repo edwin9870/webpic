@@ -2,13 +2,21 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"mvdan.cc/xurls/v2"
+)
+
+const (
+	currentWorker int8   = 15
+	dirToSavePics string = "/home/eramirez/Downloads/pic/"
 )
 
 func main() {
@@ -28,7 +36,39 @@ func main() {
 	if filterLinks == nil {
 	}
 
-	log.Printf("Count of links found: %v", len(filterLinks))
+	var wg sync.WaitGroup
+	wg.Add(len(filterLinks))
+	linkChannel := make(chan string, currentWorker)
+
+	go func() {
+		for _, v := range filterLinks {
+			linkChannel <- v
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(linkChannel)
+	}()
+
+	for links := range linkChannel {
+
+		go func(link string) {
+			defer wg.Done()
+
+			res, err := http.Get(link)
+			CheckIfError(err)
+			_, fileName := filepath.Split(link)
+
+			defer res.Body.Close()
+			file, err := os.Create(dirToSavePics + fileName)
+			CheckIfError(err)
+			defer file.Close()
+
+			io.Copy(file, res.Body)
+		}(links)
+	}
+
 }
 
 func isAnImage(url string) bool {
@@ -39,7 +79,7 @@ func isAnImage(url string) bool {
 func filter(in []string, fn func(link string) bool) []string {
 	result := make([]string, 0)
 	linkSize := len(in)
-	queueResult := make(chan string, 15)
+	queueResult := make(chan string, currentWorker)
 	var wg sync.WaitGroup
 	wg.Add(linkSize)
 	for _, v := range in {
