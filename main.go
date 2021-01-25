@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"mvdan.cc/xurls/v2"
 )
@@ -37,10 +38,27 @@ func isAnImage(url string) bool {
 //Function for filter an array based on a function
 func filter(in []string, fn func(link string) bool) []string {
 	result := make([]string, 0)
+	linkSize := len(in)
+	queueResult := make(chan string, 15)
+	var wg sync.WaitGroup
+	wg.Add(linkSize)
 	for _, v := range in {
-		if fn(v) {
-			result = append(result, v)
-		}
+
+		go func(dataToValidate string, queueResult2 chan string, wg *sync.WaitGroup) {
+			defer wg.Done()
+			if fn(dataToValidate) {
+				queueResult2 <- dataToValidate
+			}
+		}(v, queueResult, &wg)
 	}
+
+	go func() {
+		wg.Wait()
+		close(queueResult)
+	}()
+	for v := range queueResult {
+		result = append(result, v)
+	}
+	log.Println("Finish filter")
 	return result
 }
